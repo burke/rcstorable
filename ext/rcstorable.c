@@ -66,6 +66,8 @@ check_pointer(unsigned char *ptr)
 static void
 read_magic_numbers()
 {
+  extern unsigned char *serialized;
+  check_pointer(serialized+1);
   serialized++;
   serialized++;
 }
@@ -196,8 +198,8 @@ read_string(bool extended_size)
   char *np = malloc(size * sizeof(char) + 1);
   char *cnp = np;
   
+  check_pointer(serialized+rem-1);
   while (rem > 0) {
-    check_pointer(serialized);
     rem--;
     *cnp++ = *serialized++;
   }
@@ -216,7 +218,7 @@ read_extended_size()
 {
   extern unsigned char *serialized;
   int size = 0;
-  check_pointer(serialized);
+  check_pointer(serialized+3);
   
   serialized++;
   serialized++;
