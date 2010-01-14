@@ -38,15 +38,26 @@ enum hash_key_types
 
 // Used globally. Raptors. I know.
 unsigned char *serialized;
+unsigned char *serialized_end;
+
+void
+check_pointer(unsigned char *ptr)
+{
+  extern unsigned char *serialized_end;
+  if (ptr > serialized_end) {
+    rb_raise(rb_eRangeError, "malformed data");
+  }
+}
 
 VALUE
 thaw(VALUE self, VALUE str)
 {
   Check_Type(str, T_STRING);
-  extern unsigned char *serialized;
+  extern unsigned char *serialized, *serialized_end;
 
   serialized = RSTRING_PTR(str);
-
+  serialized_end = serialized + RSTRING_LEN(str);
+  
   read_magic_numbers();
   
   return read_object();
@@ -63,6 +74,7 @@ VALUE
 read_object()
 {
   extern unsigned char *serialized;
+  check_pointer(serialized);
   int type = *serialized++;
   int size = read_extended_size();
 
@@ -90,7 +102,8 @@ void
 read_n_hash_pairs(VALUE hash, int num)
 {
   extern unsigned char *serialized;
-
+  check_pointer(serialized);
+  
   if (num == 0) {
     return;
   }
@@ -122,7 +135,8 @@ void
 read_n_array_entries(VALUE array, int num)
 {
   extern unsigned char *serialized;
-
+  check_pointer(serialized);
+  
   if (num == 0) {
     return;
   }
@@ -146,7 +160,8 @@ VALUE
 read_string(bool extended_size)
 {
   extern unsigned char *serialized;
-
+  check_pointer(serialized);
+  
   int size = extended_size ? read_extended_size() : read_compact_size();
   int actual_size = 0;
   int rem;
@@ -154,17 +169,18 @@ read_string(bool extended_size)
 
   if (size == 319) { // apparently Storable uses \000\000\001\077 to mean "read until n<10"
     while (*tp++ >= 10) {
+      check_pointer(tp);
       actual_size++;
     }
     size = actual_size;
   }
-
   rem = size;
   
   char *np = malloc(size * sizeof(char) + 1);
   char *cnp = np;
   
   while (rem > 0) {
+    check_pointer(serialized);
     rem--;
     *cnp++ = *serialized++;
   }
@@ -182,7 +198,8 @@ read_extended_size()
 {
   extern unsigned char *serialized;
   int size = 0;
-
+  check_pointer(serialized);
+  
   serialized++;
   serialized++;
   size += 256*(*serialized++);
@@ -196,6 +213,7 @@ read_extended_size()
  */
 int
 read_compact_size() {
+  check_pointer(serialized);
   extern unsigned char *serialized;
   return *serialized++;
 }
