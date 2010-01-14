@@ -5,13 +5,13 @@
 #include "ruby.h"
 
 VALUE thaw(VALUE, VALUE);
-VALUE read_object();
-int read_extended_size();
-int read_compact_size();
-void read_n_hash_pairs(VALUE, int);
-void read_n_array_entries(VALUE, int);
-VALUE read_string(bool);
-void read_magic_numbers();
+static VALUE read_object();
+static int read_extended_size();
+static int read_compact_size();
+static void read_n_hash_pairs(VALUE, int);
+static void read_n_array_entries(VALUE, int);
+static VALUE read_string(bool);
+static void read_magic_numbers();
 
 enum states
 {
@@ -20,27 +20,22 @@ enum states
   READ_NEW_OBJECT
 };
 
-enum object_types
+enum perl_types
 {
-  O_STR       = 1,
-  O_ARRAY     = 2,
-  O_HASH      = 3,
-  O_UNDEFINED = 5
-};
-
-enum hash_key_types
-{
-  H_VECTOR     = 4,
-  H_EMPTY      = 5,
-  H_STRING     = 10,
-  H_STRING_ALT = 23
+  PT_HASH_KEY   = 1,
+  PT_ARRAY      = 2,
+  PT_HASH       = 3,
+  PT_VECTOR     = 4,
+  PT_UNDEF      = 5,
+  PT_STRING     = 10,
+  PT_STRING_ALT = 23
 };
 
 // Used globally. Raptors. I know.
-unsigned char *serialized;
-unsigned char *serialized_end;
+static unsigned char *serialized;
+static unsigned char *serialized_end;
 
-void
+static void
 check_pointer(unsigned char *ptr)
 {
   extern unsigned char *serialized_end;
@@ -63,14 +58,14 @@ thaw(VALUE self, VALUE str)
   return read_object();
 }
 
-void
+static void
 read_magic_numbers()
 {
   serialized++;
   serialized++;
 }
 
-VALUE
+static VALUE
 read_object()
 {
   extern unsigned char *serialized;
@@ -81,15 +76,15 @@ read_object()
   VALUE object;
 
   switch(type) {
-  case O_HASH:
+  case PT_HASH:
     object = rb_hash_new();
     read_n_hash_pairs(object, size);
     break;
-  case O_ARRAY:
+  case PT_ARRAY:
     object = rb_ary_new();
     read_n_array_entries(object, size);
     break;
-  case O_UNDEFINED:
+  case PT_UNDEF:
     object = Qnil;
     break;
   }
@@ -98,7 +93,7 @@ read_object()
 }
 
   
-void
+static void
 read_n_hash_pairs(VALUE hash, int num)
 {
   extern unsigned char *serialized;
@@ -113,16 +108,16 @@ read_n_hash_pairs(VALUE hash, int num)
   VALUE str;
   
   switch(type) {
-  case H_EMPTY:
+  case PT_UNDEF:
     rb_hash_aset(hash, read_string(true), Qnil);
     break;
-  case H_VECTOR:
+  case PT_VECTOR:
     temp = read_object();
     str = read_string(true);
     rb_hash_aset(hash, str, temp);
     break;
-  case H_STRING:
-  case H_STRING_ALT:
+  case PT_STRING:
+  case PT_STRING_ALT:
     temp = read_string(false);
     rb_hash_aset(hash, read_string(true), temp);
     break;
@@ -131,7 +126,7 @@ read_n_hash_pairs(VALUE hash, int num)
   read_n_hash_pairs(hash, num-1);
 }
 
-void
+static void
 read_n_array_entries(VALUE array, int num)
 {
   extern unsigned char *serialized;
@@ -145,7 +140,7 @@ read_n_array_entries(VALUE array, int num)
   int type = *serialized++;
 
   switch(type) {
-  case O_STR:
+  case PT_HASH_KEY:
     item = read_string(true);
     break;
   }
@@ -156,7 +151,12 @@ read_n_array_entries(VALUE array, int num)
 }
 
 
-VALUE
+/*
+ * Given a size, read in a string of that size. Note that Storable seems to use 319 as a
+ * magic value, meaning the string should be read until a very low character is found.
+ * I should test this more specifically, but it's somewhere lower than "0", aka 48.
+ */
+static VALUE
 read_string(bool extended_size)
 {
   extern unsigned char *serialized;
@@ -192,8 +192,9 @@ read_string(bool extended_size)
 
 /*
  * Extended sizes are given as [w,x,y,z], where the size is 256*y + z.
+ * This should really be read as a uint_32t, I guess.
  */
-int
+static int
 read_extended_size()
 {
   extern unsigned char *serialized;
@@ -211,7 +212,7 @@ read_extended_size()
 /*
  * Just one byte.
  */
-int
+static int
 read_compact_size() {
   check_pointer(serialized);
   extern unsigned char *serialized;
