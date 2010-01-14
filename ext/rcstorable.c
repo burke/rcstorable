@@ -173,7 +173,7 @@ read_n_array_entries(VALUE array, int num)
 /*
  * Given a size, read in a string of that size. Note that Storable seems to use 319 as a
  * magic value, meaning the string should be read until a very low character is found.
- * I should test this more specifically, but it's somewhere lower than "0", aka 48.
+ * I should test this more specifically, but it's somewhere lower than "\t", aka 7.
  */
 static VALUE
 read_string(bool extended_size)
@@ -186,8 +186,8 @@ read_string(bool extended_size)
   int rem;
   char *tp = serialized;
 
-  if (size == 319) { // apparently Storable uses \000\000\001\077 to mean "read until n<10"
-    while (*tp++ >= 10) {
+  if (size == 319) { // apparently Storable uses \000\000\001\077 to mean "read until n<7"
+    while (*tp++ >= 7) {
       check_pointer(tp);
       actual_size++;
     }
