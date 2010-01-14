@@ -12,13 +12,7 @@ static void read_n_hash_pairs(VALUE, int);
 static void read_n_array_entries(VALUE, int);
 static VALUE read_string(bool);
 static void read_magic_numbers();
-
-enum states
-{
-  READ_EXTENDED_SIZE,
-  READ_COMPACT_SIZE,
-  READ_NEW_OBJECT
-};
+static void check_pointer(unsigned char*);
 
 enum perl_types
 {
@@ -35,15 +29,9 @@ enum perl_types
 static unsigned char *serialized;
 static unsigned char *serialized_end;
 
-static void
-check_pointer(unsigned char *ptr)
-{
-  extern unsigned char *serialized_end;
-  if (ptr > serialized_end) {
-    rb_raise(rb_eRangeError, "malformed data");
-  }
-}
-
+/*
+ * Given a perl Storable frozen blob, decode it into a ruby data structure.
+ */
 VALUE
 thaw(VALUE self, VALUE str)
 {
@@ -58,6 +46,23 @@ thaw(VALUE self, VALUE str)
   return read_object();
 }
 
+/*
+ * Malformed strings can theoretically cause segfaults. Segfaults are bad.
+ * We'll check pretty much everything we do against the pre-computed end-of-string.
+ */
+static void
+check_pointer(unsigned char *ptr)
+{
+  extern unsigned char *serialized_end;
+  if (ptr > serialized_end) {
+    rb_raise(rb_eRangeError, "malformed data");
+  }
+}
+
+/*
+ * Certain test cases start with \005\006. Other ones don't.
+ * This will need to be fixed eventually.
+ */
 static void
 read_magic_numbers()
 {
@@ -65,6 +70,10 @@ read_magic_numbers()
   serialized++;
 }
 
+/*
+ * Figure out what type of object is at the front of serialized, read it in, potentially
+ * recursively creating several other sub-objects in the process, and return it.
+ */
 static VALUE
 read_object()
 {
@@ -93,6 +102,10 @@ read_object()
 }
 
   
+/*
+ * We've already created a hash, and read the size of it.
+ * Now we need to read in n items, and add them to the hash.
+ */
 static void
 read_n_hash_pairs(VALUE hash, int num)
 {
@@ -126,6 +139,10 @@ read_n_hash_pairs(VALUE hash, int num)
   read_n_hash_pairs(hash, num-1);
 }
 
+/*
+ * We've already created an array, and read the size of it.
+ * Now we need to read in n items, and add them to the array.
+ */
 static void
 read_n_array_entries(VALUE array, int num)
 {
