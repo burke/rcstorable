@@ -1,19 +1,22 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdint.h>
 
 #include "ruby.h"
+
+typedef unsigned char uchar;
 
 VALUE thaw(VALUE, VALUE);
 static VALUE read_object();
 static VALUE read_boolean();
-static int read_extended_size();
-static int read_compact_size();
-static void read_n_hash_pairs(VALUE, int);
-static void read_n_array_entries(VALUE, int);
+static uint32_t read_32_bit_integer();
+static uint32_t read_compact_size();
+static void read_n_hash_pairs(VALUE, uint32_t);
+static void read_n_array_entries(VALUE, uint32_t);
 static VALUE read_string(bool);
 static void read_magic_numbers();
-static void check_pointer(unsigned char*);
+static void check_pointer(uchar*);
 
 enum perl_types
 {
@@ -23,13 +26,14 @@ enum perl_types
   PT_VECTOR     = 4,
   PT_UNDEF      = 5,
   PT_BOOLEAN    = 8,
+  PT_INT32      = 9,
   PT_STRING     = 10,
   PT_STRING_ALT = 23
 };
 
 // Used globally. Raptors. I know.
-static unsigned char *serialized;
-static unsigned char *serialized_end;
+static uchar *serialized;
+static uchar *serialized_end;
 
 /*
  * Given a perl Storable frozen blob, decode it into a ruby data structure.
@@ -38,7 +42,7 @@ VALUE
 thaw(VALUE self, VALUE str)
 {
   Check_Type(str, T_STRING);
-  extern unsigned char *serialized, *serialized_end;
+  extern uchar *serialized, *serialized_end;
 
   serialized = RSTRING_PTR(str);
   serialized_end = serialized + RSTRING_LEN(str);
@@ -53,9 +57,9 @@ thaw(VALUE self, VALUE str)
  * We'll check pretty much everything we do against the pre-computed end-of-string.
  */
 static void
-check_pointer(unsigned char *ptr)
+check_pointer(uchar *ptr)
 {
-  extern unsigned char *serialized_end;
+  extern uchar *serialized_end;
   if (ptr > serialized_end) {
     rb_raise(rb_eRangeError, "malformed data");
   }
@@ -68,10 +72,9 @@ check_pointer(unsigned char *ptr)
 static void
 read_magic_numbers()
 {
-  extern unsigned char *serialized;
+  extern uchar *serialized;
   check_pointer(serialized+1);
-  serialized++;
-  serialized++;
+  serialized += 2;
 }
 
 /*
@@ -81,24 +84,39 @@ read_magic_numbers()
 static VALUE
 read_object()
 {
-  extern unsigned char *serialized;
+  extern uchar *serialized;
   check_pointer(serialized);
-  int type = *serialized++;
-  int size = read_extended_size();
+  uint32_t type = *serialized++;
+  uint32_t size;
 
   VALUE object;
 
   switch(type) {
+  case PT_UNDEF:
+    object = Qnil;
+    break;
   case PT_HASH:
     object = rb_hash_new();
+    size = read_32_bit_integer();
     read_n_hash_pairs(object, size);
+    break;
+  case PT_INT32:
+    object = read_32_bit_integer();
     break;
   case PT_ARRAY:
     object = rb_ary_new();
+    size = read_32_bit_integer();
     read_n_array_entries(object, size);
     break;
-  case PT_UNDEF:
-    object = Qnil;
+  case PT_BOOLEAN:
+    object = read_boolean();
+    break;
+  case PT_STRING:
+  case PT_STRING_ALT:
+    object = read_string(false);
+    break;
+  case PT_VECTOR:
+    object = read_object(); // This is a marker we can just ignore...
     break;
   }
   
@@ -111,45 +129,18 @@ read_object()
  * Now we need to read in n items, and add them to the hash.
  */
 static void
-read_n_hash_pairs(VALUE hash, int num)
+read_n_hash_pairs(VALUE hash, uint32_t num)
 {
-  extern unsigned char *serialized;
-  check_pointer(serialized);
-  
-  if (num == 0) {
-    return;
-  }
-  
-  int type = *serialized++;
-  VALUE temp;
-  VALUE str;
-  
-  switch(type) {
-  case PT_UNDEF:
-    rb_hash_aset(hash, read_string(true), Qnil);
-    break;
-  case PT_VECTOR:
-    temp = read_object();
-    str = read_string(true);
-    rb_hash_aset(hash, str, temp);
-    break;
-  case PT_BOOLEAN:
-    temp = read_boolean();
-    rb_hash_aset(hash, read_string(true), temp);
-    break;
-  case PT_STRING:
-  case PT_STRING_ALT:
-    temp = read_string(false);
-    rb_hash_aset(hash, read_string(true), temp);
-    break;
-  }
-
+  if (num == 0) { return; }
+  VALUE temp = read_object();
+  rb_hash_aset(hash, read_string(true), temp);
   read_n_hash_pairs(hash, num-1);
 }
 
 static VALUE
 read_boolean()
 {
+  extern uchar *serialized;
   check_pointer(serialized);
   return (*serialized++ == 128) ? Qfalse : Qtrue;
 }
@@ -159,26 +150,10 @@ read_boolean()
  * Now we need to read in n items, and add them to the array.
  */
 static void
-read_n_array_entries(VALUE array, int num)
+read_n_array_entries(VALUE array, uint32_t num)
 {
-  extern unsigned char *serialized;
-  check_pointer(serialized);
-  
-  if (num == 0) {
-    return;
-  }
-  
-  VALUE item = Qnil;
-  int type = *serialized++;
-
-  switch(type) {
-  case PT_HASH_KEY:
-    item = read_string(true);
-    break;
-  }
-
-  rb_ary_push(array, item);
-  
+  if (num == 0) { return; }
+  rb_ary_push(array, read_object());
   read_n_array_entries(array, num-1);
 }
 
@@ -191,13 +166,14 @@ read_n_array_entries(VALUE array, int num)
 static VALUE
 read_string(bool extended_size)
 {
-  extern unsigned char *serialized;
+  extern uchar *serialized;
   check_pointer(serialized);
-  
-  int size = extended_size ? read_extended_size() : read_compact_size();
-  int actual_size = 0;
-  int rem;
-  char *tp = serialized;
+
+  uint32_t size = extended_size ? read_32_bit_integer() : read_compact_size();
+
+  uint32_t actual_size = 0;
+  uint32_t rem;
+  uchar *tp = serialized;
 
   if (size == 319) { // apparently Storable uses \000\000\001\077 to mean "read until n<7"
     while (*tp++ >= 7) {
@@ -208,8 +184,8 @@ read_string(bool extended_size)
   }
   rem = size;
   
-  char *np = malloc(size * sizeof(char) + 1);
-  char *cnp = np;
+  uchar *np = ALLOC_N(char, size+1);
+  uchar *cnp = np;
   
   check_pointer(serialized+rem-1);
   while (rem > 0) {
@@ -226,17 +202,20 @@ read_string(bool extended_size)
  * Extended sizes are given as [w,x,y,z], where the size is 256*y + z.
  * This should really be read as a uint_32t, I guess.
  */
-static int
-read_extended_size()
+static uint32_t
+read_32_bit_integer()
 {
-  extern unsigned char *serialized;
-  int size = 0;
+  extern uchar *serialized;
+
+  uint32_t size = 0;
+
   check_pointer(serialized+3);
-  
-  serialized++;
-  serialized++;
-  size += 256*(*serialized++);
-  size += *serialized++;
+
+  // I don't want to deal with byte-order. This is just easier. 
+  size += (*serialized++)*16777216;
+  size += (*serialized++)*65536;
+  size += (*serialized++)*256;
+  size += (*serialized++);
 
   return size;
 }
@@ -244,10 +223,10 @@ read_extended_size()
 /*
  * Just one byte.
  */
-static int
+static uint32_t
 read_compact_size() {
+  extern uchar *serialized;
   check_pointer(serialized);
-  extern unsigned char *serialized;
   return *serialized++;
 }
 
