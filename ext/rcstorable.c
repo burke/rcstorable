@@ -87,9 +87,9 @@ read_object()
   extern uchar *serialized;
   check_pointer(serialized);
   uint32_t type = *serialized++;
-  uint32_t size;
+  uint32_t size = 0;
 
-  VALUE object;
+  VALUE object = Qnil;
 
   switch(type) {
   case PT_UNDEF:
@@ -184,7 +184,7 @@ read_string(bool extended_size)
   }
   rem = size;
   
-  uchar *np = ALLOC_N(char, size+1);
+  uchar *np = ALLOCA_N(char, size+1);
   uchar *cnp = np;
   
   check_pointer(serialized+rem-1);
