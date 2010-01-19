@@ -6,6 +6,7 @@
 
 VALUE thaw(VALUE, VALUE);
 static VALUE read_object();
+static VALUE read_boolean();
 static int read_extended_size();
 static int read_compact_size();
 static void read_n_hash_pairs(VALUE, int);
@@ -21,6 +22,7 @@ enum perl_types
   PT_HASH       = 3,
   PT_VECTOR     = 4,
   PT_UNDEF      = 5,
+  PT_BOOLEAN    = 8,
   PT_STRING     = 10,
   PT_STRING_ALT = 23
 };
@@ -131,6 +133,10 @@ read_n_hash_pairs(VALUE hash, int num)
     str = read_string(true);
     rb_hash_aset(hash, str, temp);
     break;
+  case PT_BOOLEAN:
+    temp = read_boolean();
+    rb_hash_aset(hash, read_string(true), temp);
+    break;
   case PT_STRING:
   case PT_STRING_ALT:
     temp = read_string(false);
@@ -139,6 +145,13 @@ read_n_hash_pairs(VALUE hash, int num)
   }
 
   read_n_hash_pairs(hash, num-1);
+}
+
+static VALUE
+read_boolean()
+{
+  check_pointer(serialized);
+  return (*serialized++ == 128) ? Qfalse : Qtrue;
 }
 
 /*
