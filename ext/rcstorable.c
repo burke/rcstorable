@@ -41,6 +41,8 @@ static uchar *serialized_end;
 VALUE
 thaw(VALUE self, VALUE str)
 {
+  if (str == Qnil) return Qnil; // Do something logical with nil.
+  
   Check_Type(str, T_STRING);
   extern uchar *serialized, *serialized_end;
 
@@ -101,7 +103,7 @@ read_object()
     read_n_hash_pairs(object, size);
     break;
   case PT_INT32:
-    object = read_32_bit_integer();
+    object = INT2FIX(read_32_bit_integer());
     break;
   case PT_ARRAY:
     object = rb_ary_new();
@@ -169,6 +171,8 @@ read_string(bool extended_size)
   extern uchar *serialized;
   check_pointer(serialized);
 
+  VALUE ret;
+  
   uint32_t size = extended_size ? read_32_bit_integer() : read_compact_size();
 
   uint32_t actual_size = 0;
@@ -184,7 +188,7 @@ read_string(bool extended_size)
   }
   rem = size;
   
-  uchar *np = ALLOCA_N(char, size+1);
+  uchar *np = malloc(size+1);
   uchar *cnp = np;
   
   check_pointer(serialized+rem-1);
@@ -195,7 +199,9 @@ read_string(bool extended_size)
 
   *cnp++ = '\0';
 
-  return rb_str_new(np, size);
+  ret = rb_str_new(np, size);
+  free(np);
+  return ret;
 }
 
 /*
