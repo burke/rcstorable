@@ -12,7 +12,9 @@ begin
     gem.email = "burke.libbey@canadadrugs.com"
     gem.homepage = "http://canadadrugs.com"
     gem.authors = ["Burke Libbey"]
-    gem.files.include '{spec,lib,ext}/**/*'
+    gem.files.include '{spec,lib}/**/*'
+    gem.files.include 'ext/**/*.{c,h,rb}'
+    gem.files.include 'ext/**/{Makefile,Rakefile}'
     gem.extensions = ["ext/extconf.rb"]
   end
 rescue LoadError

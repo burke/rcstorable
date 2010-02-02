@@ -172,11 +172,8 @@ read_string(bool extended_size)
   check_pointer(serialized);
 
   VALUE ret;
-  
   uint32_t size = extended_size ? read_32_bit_integer() : read_compact_size();
-
   uint32_t actual_size = 0;
-  uint32_t rem;
   uchar *tp = serialized;
 
   if (size == 319) { // apparently Storable uses \000\000\001\077 to mean "read until n<7"
@@ -186,19 +183,12 @@ read_string(bool extended_size)
     }
     size = actual_size;
   }
-  rem = size;
   
   uchar *np = malloc(size+1);
-  uchar *cnp = np;
+  check_pointer(serialized+size-1);
+  memcpy(np, serialized, size);
+  serialized += size;
   
-  check_pointer(serialized+rem-1);
-  while (rem > 0) {
-    rem--;
-    *cnp++ = *serialized++;
-  }
-
-  *cnp++ = '\0';
-
   ret = rb_str_new(np, size);
   free(np);
   return ret;
