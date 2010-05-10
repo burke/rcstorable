@@ -16,10 +16,13 @@ static void read_n_hash_pairs(VALUE, uint32_t);
 static void read_n_array_entries(VALUE, uint32_t);
 static VALUE read_string(bool);
 static void read_magic_numbers();
-static void check_pointer(uchar*);
+static inline void check_pointer(uchar*);
 
-enum perl_types
-{
+// Perl Storable encodes values with an associated type.
+// There are probably more types than are enumerated here,
+// but I've yet to encounter them.
+
+enum perl_types {
   PT_HASH_KEY   = 1,
   PT_ARRAY      = 2,
   PT_HASH       = 3,
@@ -34,6 +37,8 @@ enum perl_types
 // Used globally. Raptors. I know.
 static uchar *serialized;
 static uchar *serialized_end;
+
+static uchar *error_message = "malformed data";
 
 /*
  * Given a perl Storable frozen blob, decode it into a ruby data structure.
@@ -58,12 +63,12 @@ thaw(VALUE self, VALUE str)
  * Malformed strings can theoretically cause segfaults. Segfaults are bad.
  * We'll check pretty much everything we do against the pre-computed end-of-string.
  */
-static void
+static inline void
 check_pointer(uchar *ptr)
 {
-  extern uchar *serialized_end;
+  extern uchar *serialized_end, *error_message;
   if (ptr > serialized_end) {
-    rb_raise(rb_eRangeError, "malformed data");
+    rb_raise(rb_eRangeError, error_message);
   }
 }
 
@@ -155,10 +160,10 @@ static void
 read_n_array_entries(VALUE array, uint32_t num)
 {
   if (num == 0) { return; }
+  read_compact_size();
   rb_ary_push(array, read_object());
   read_n_array_entries(array, num-1);
 }
-
 
 /*
  * Given a size, read in a string of that size. Note that Storable seems to use 319 as a
@@ -177,15 +182,17 @@ read_string(bool extended_size)
   uchar *tp = serialized;
 
   if (size == 319) { // apparently Storable uses \000\000\001\077 to mean "read until n<7"
+    printf("319\n");
     while (*tp++ >= 7) {
       check_pointer(tp);
       actual_size++;
     }
+    printf("319:%d\n",actual_size);
     size = actual_size;
   }
   
-  uchar *np = malloc(size+1);
   check_pointer(serialized+size-1);
+  uchar *np = malloc(size+1);
   memcpy(np, serialized, size);
   serialized += size;
   
