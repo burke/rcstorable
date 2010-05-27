@@ -9,7 +9,7 @@ typedef unsigned char uchar;
 
 VALUE thaw(VALUE, VALUE);
 static VALUE read_object();
-static VALUE read_boolean();
+static VALUE read_number();
 static uint32_t read_32_bit_integer();
 static uint32_t read_compact_size();
 static void read_n_hash_pairs(VALUE, uint32_t);
@@ -18,9 +18,9 @@ static VALUE read_string(bool);
 static void read_magic_numbers();
 static inline void check_pointer(uchar*);
 
-// Perl Storable encodes values with an associated type.
-// There are probably more types than are enumerated here,
-// but I've yet to encounter them.
+/* Perl Storable encodes values with an associated type.
+ * There are probably more types than are enumerated here,
+ * but I've yet to encounter them. */
 
 enum perl_types {
   PT_LONG_STRING = 1,
@@ -28,13 +28,13 @@ enum perl_types {
   PT_HASH        = 3,
   PT_VECTOR      = 4,
   PT_UNDEF       = 5,
-  PT_BOOLEAN     = 8,
+  PT_NUMBER      = 8,
   PT_INT32       = 9,
   PT_STRING      = 10,
   PT_STRING_ALT  = 23
 };
 
-// Used globally. Raptors. I know.
+/* Used globally. Raptors. I know. */
 static uchar *serialized;
 static uchar *serialized_end;
 
@@ -46,7 +46,7 @@ static uchar *error_message = "malformed data";
 VALUE
 thaw(VALUE self, VALUE str)
 {
-  if (str == Qnil) return Qnil; // Do something logical with nil.
+  if (str == Qnil) return Qnil; /* Do something logical with nil. */
   
   Check_Type(str, T_STRING);
   extern uchar *serialized, *serialized_end;
@@ -115,8 +115,8 @@ read_object()
     size = read_32_bit_integer();
     read_n_array_entries(object, size);
     break;
-  case PT_BOOLEAN:
-    object = read_boolean();
+  case PT_NUMBER:
+    object = read_number();
     break;
   case PT_STRING:
   case PT_STRING_ALT:
@@ -126,7 +126,7 @@ read_object()
     object = read_string(true);
     break;
   case PT_VECTOR:
-    object = read_object(); // This is a marker we can just ignore...
+    object = read_object(); /* This is a marker we can just ignore... */
     break;
   }
   
@@ -147,12 +147,16 @@ read_n_hash_pairs(VALUE hash, uint32_t num)
   read_n_hash_pairs(hash, num-1);
 }
 
+/*
+ * Numbers below |128| are encoded as a sort of signed byte.
+ * High bit 0 implies negative, high bit 1 implies positive.
+ */ 
 static VALUE
-read_boolean()
+read_number()
 {
   extern uchar *serialized;
   check_pointer(serialized);
-  return (*serialized++ == 128) ? Qfalse : Qtrue;
+  return INT2FIX((signed char)(*serialized++ ^ 0x80));
 }
 
 /*
@@ -187,7 +191,7 @@ read_string(bool extended_size)
   uint32_t actual_size = 0;
   uchar *tp = serialized;
 
-  if (size == 319) { // apparently Storable uses \000\000\001\077 to mean "read until n<7"
+  if (size == 319) { /* apparently Storable uses \000\000\001\077 to mean "read until n<7" */
     while (*tp++ >= 7) {
       check_pointer(tp);
       actual_size++;
@@ -218,7 +222,7 @@ read_32_bit_integer()
 
   check_pointer(serialized+3);
 
-  // I don't want to deal with byte-order. This is just easier. 
+  /* I don't want to deal with byte-order. This is just easier. */
   size += (*serialized++)*16777216;
   size += (*serialized++)*65536;
   size += (*serialized++)*256;
