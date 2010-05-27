@@ -122,6 +122,9 @@ read_object()
   case PT_STRING_ALT:
     object = read_string(false);
     break;
+  case PT_HASH_KEY:
+    object = read_string(true);
+    break;
   case PT_VECTOR:
     object = read_object(); // This is a marker we can just ignore...
     break;
@@ -185,12 +188,10 @@ read_string(bool extended_size)
   uchar *tp = serialized;
 
   if (size == 319) { // apparently Storable uses \000\000\001\077 to mean "read until n<7"
-    printf("319\n");
     while (*tp++ >= 7) {
       check_pointer(tp);
       actual_size++;
     }
-    printf("319:%d\n",actual_size);
     size = actual_size;
   }
   

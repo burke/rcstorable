@@ -27,5 +27,19 @@ describe RCStorable do
     RCStorable.thaw(store).should == expected
   end
 
+  it "arrays should work" do 
+    store = "\005\a\003\000\000\000\001\004\002\000\000\000\003\n\004asdf\n\004zxcv\n\004qwer\000\000\000\001b" 
+    
+    expected = {"b" => ["asdf", "zxcv", "qwer"]}
 
+    RCStorable.thaw(store).should == expected
+  end 
+
+  it "empty hash" do
+    store = "\005\a\003\000\000\000\001\004\003\000\000\000\000\000\000\000\001a" 
+    
+    expected = {"a" => {}}
+    RCStorable.thaw(store).should == expected
+  end 
+  
 end
