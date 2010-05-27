@@ -23,15 +23,15 @@ static inline void check_pointer(uchar*);
 // but I've yet to encounter them.
 
 enum perl_types {
-  PT_HASH_KEY   = 1,
-  PT_ARRAY      = 2,
-  PT_HASH       = 3,
-  PT_VECTOR     = 4,
-  PT_UNDEF      = 5,
-  PT_BOOLEAN    = 8,
-  PT_INT32      = 9,
-  PT_STRING     = 10,
-  PT_STRING_ALT = 23
+  PT_LONG_STRING = 1,
+  PT_ARRAY       = 2,
+  PT_HASH        = 3,
+  PT_VECTOR      = 4,
+  PT_UNDEF       = 5,
+  PT_BOOLEAN     = 8,
+  PT_INT32       = 9,
+  PT_STRING      = 10,
+  PT_STRING_ALT  = 23
 };
 
 // Used globally. Raptors. I know.
@@ -122,7 +122,7 @@ read_object()
   case PT_STRING_ALT:
     object = read_string(false);
     break;
-  case PT_HASH_KEY:
+  case PT_LONG_STRING:
     object = read_string(true);
     break;
   case PT_VECTOR:
