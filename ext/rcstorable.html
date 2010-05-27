@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta http-equiv="content-type" content="text/html;charset=utf-8">
+  <title>rcstorable.c</title>
+  <link rel="stylesheet" href="http://jashkenas.github.com/docco/resources/docco.css">
+  <style>
+    @font-face {
+      font-family: 'PragmataTTRegular';
+      src: url('pragmata.eot');
+      src: local('Pragmata TT'), local('PragmataTT'), url('pragmata.woff') format('woff'), url('pragmata.ttf') format('truetype');
+    }
+    .highlight {
+      font-family: 'PragmataTTRegular';
+    }
+  </style>
+
+</head>
+<body>
+<div id='container'>
+  <div id="background"></div>
+  <table cellspacing=0 cellpadding=0>
+  <thead>
+    <tr>
+      <th class=docs><h1>rcstorable.c</h1></th>
+      <th class=code></th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr id='section-1'>
+      <td class=docs>
+        <div class="octowrap">
+          <a class="octothorpe" href="#section-1">#</a>
+        </div>
+        
+      </td>
+      <td class=code>
+        <div class='highlight'><pre><span class="cp">#include &lt;stdbool.h&gt;</span>
+<span class="cp">#include &lt;stdio.h&gt;</span>
+<span class="cp">#include &lt;string.h&gt;</span>
+<span class="cp">#include &lt;stdint.h&gt;</span>
+
+<span class="cp">#include &quot;ruby.h&quot;</span>
+
+<span class="k">typedef</span> <span class="kt">unsigned</span> <span class="kt">char</span> <span class="n">uchar</span><span class="p">;</span>
+
+<span class="n">VALUE</span> <span class="n">thaw</span><span class="p">(</span><span class="n">VALUE</span><span class="p">,</span> <span class="n">VALUE</span><span class="p">);</span>
+<span class="k">static</span> <span class="n">VALUE</span> <span class="n">read_object</span><span class="p">();</span>
+<span class="k">static</span> <span class="n">VALUE</span> <span class="n">read_boolean</span><span class="p">();</span>
+<span class="k">static</span> <span class="kt">uint32_t</span> <span class="n">read_32_bit_integer</span><span class="p">();</span>
+<span class="k">static</span> <span class="kt">uint32_t</span> <span class="n">read_compact_size</span><span class="p">();</span>
+<span class="k">static</span> <span class="kt">void</span> <span class="n">read_n_hash_pairs</span><span class="p">(</span><span class="n">VALUE</span><span class="p">,</span> <span class="kt">uint32_t</span><span class="p">);</span>
+<span class="k">static</span> <span class="kt">void</span> <span class="n">read_n_array_entries</span><span class="p">(</span><span class="n">VALUE</span><span class="p">,</span> <span class="kt">uint32_t</span><span class="p">);</span>
+<span class="k">static</span> <span class="n">VALUE</span> <span class="n">read_string</span><span class="p">(</span><span class="n">bool</span><span class="p">);</span>
+<span class="k">static</span> <span class="kt">void</span> <span class="n">read_magic_numbers</span><span class="p">();</span>
+<span class="k">static</span> <span class="kt">void</span> <span class="n">check_pointer</span><span class="p">(</span><span class="n">uchar</span><span class="o">*</span><span class="p">);</span>
+
+<span class="k">enum</span> <span class="n">perl_types</span>
+<span class="p">{</span>
+  <span class="n">PT_HASH_KEY</span>   <span class="o">=</span> <span class="mi">1</span><span class="p">,</span>
+  <span class="n">PT_ARRAY</span>      <span class="o">=</span> <span class="mi">2</span><span class="p">,</span>
+  <span class="n">PT_HASH</span>       <span class="o">=</span> <span class="mi">3</span><span class="p">,</span>
+  <span class="n">PT_VECTOR</span>     <span class="o">=</span> <span class="mi">4</span><span class="p">,</span>
+  <span class="n">PT_UNDEF</span>      <span class="o">=</span> <span class="mi">5</span><span class="p">,</span>
+  <span class="n">PT_BOOLEAN</span>    <span class="o">=</span> <span class="mi">8</span><span class="p">,</span>
+  <span class="n">PT_INT32</span>      <span class="o">=</span> <span class="mi">9</span><span class="p">,</span>
+  <span class="n">PT_STRING</span>     <span class="o">=</span> <span class="mi">10</span><span class="p">,</span>
+  <span class="n">PT_STRING_ALT</span> <span class="o">=</span> <span class="mi">23</span>
+<span class="p">};</span>
+
+<span class="c">// Used globally. Raptors. I know.</span>
+<span class="k">static</span> <span class="n">uchar</span> <span class="o">*</span><span class="n">serialized</span><span class="p">;</span>
+<span class="k">static</span> <span class="n">uchar</span> <span class="o">*</span><span class="n">serialized_end</span><span class="p">;</span></pre></div>
+      </td>
+    </tr>
+    <tr id='section-2'>
+      <td class=docs>
+        <div class="octowrap">
+          <a class="octothorpe" href="#section-2">#</a>
+        </div>
+        <p> Given a perl Storable frozen blob, decode it into a ruby data structure.</p>
+      </td>
+      <td class=code>
+        <div class='highlight'><pre><span class="n">VALUE</span>
+<span class="nf">thaw</span><span class="p">(</span><span class="n">VALUE</span> <span class="n">self</span><span class="p">,</span> <span class="n">VALUE</span> <span class="n">str</span><span class="p">)</span>
+<span class="p">{</span>
+  <span class="k">if</span> <span class="p">(</span><span class="n">str</span> <span class="o">==</span> <span class="n">Qnil</span><span class="p">)</span> <span class="k">return</span> <span class="n">Qnil</span><span class="p">;</span> <span class="c">// Do something logical with nil.</span>
+  
+  <span class="n">Check_Type</span><span class="p">(</span><span class="n">str</span><span class="p">,</span> <span class="n">T_STRING</span><span class="p">);</span>
+  <span class="k">extern</span> <span class="n">uchar</span> <span class="o">*</span><span class="n">serialized</span><span class="p">,</span> <span class="o">*</span><span class="n">serialized_end</span><span class="p">;</span>
+
+  <span class="n">serialized</span> <span class="o">=</span> <span class="n">RSTRING_PTR</span><span class="p">(</span><span class="n">str</span><span class="p">);</span>
+  <span class="n">serialized_end</span> <span class="o">=</span> <span class="n">serialized</span> <span class="o">+</span> <span class="n">RSTRING_LEN</span><span class="p">(</span><span class="n">str</span><span class="p">);</span>
+  
+  <span class="n">read_magic_numbers</span><span class="p">();</span>
+  
+  <span class="k">return</span> <span class="n">read_object</span><span class="p">();</span>
+<span class="p">}</span></pre></div>
+      </td>
+    </tr>
+    <tr id='section-3'>
+      <td class=docs>
+        <div class="octowrap">
+          <a class="octothorpe" href="#section-3">#</a>
+        </div>
+        <p> Malformed strings can theoretically cause segfaults. Segfaults are bad.
+ We&rsquo;ll check pretty much everything we do against the pre-computed end-of-string.</p>
+      </td>
+      <td class=code>
+        <div class='highlight'><pre><span class="k">static</span> <span class="kt">void</span>
+<span class="nf">check_pointer</span><span class="p">(</span><span class="n">uchar</span> <span class="o">*</span><span class="n">ptr</span><span class="p">)</span>
+<span class="p">{</span>
+  <span class="k">extern</span> <span class="n">uchar</span> <span class="o">*</span><span class="n">serialized_end</span><span class="p">;</span>
+  <span class="k">if</span> <span class="p">(</span><span class="n">ptr</span> <span class="o">&gt;</span> <span class="n">serialized_end</span><span class="p">)</span> <span class="p">{</span>
+    <span class="n">rb_raise</span><span class="p">(</span><span class="n">rb_eRangeError</span><span class="p">,</span> <span class="s">&quot;malformed data&quot;</span><span class="p">);</span>
+  <span class="p">}</span>
+<span class="p">}</span></pre></div>
+      </td>
+    </tr>
+    <tr id='section-4'>
+      <td class=docs>
+        <div class="octowrap">
+          <a class="octothorpe" href="#section-4">#</a>
+        </div>
+        <p> Certain test cases start with \005\006. Other ones don&rsquo;t.
+ This will need to be fixed eventually.</p>
+      </td>
+      <td class=code>
+        <div class='highlight'><pre><span class="k">static</span> <span class="kt">void</span>
+<span class="nf">read_magic_numbers</span><span class="p">()</span>
+<span class="p">{</span>
+  <span class="k">extern</span> <span class="n">uchar</span> <span class="o">*</span><span class="n">serialized</span><span class="p">;</span>
+  <span class="n">check_pointer</span><span class="p">(</span><span class="n">serialized</span><span class="o">+</span><span class="mi">1</span><span class="p">);</span>
+  <span class="n">serialized</span> <span class="o">+=</span> <span class="mi">2</span><span class="p">;</span>
+<span class="p">}</span></pre></div>
+      </td>
+    </tr>
+    <tr id='section-5'>
+      <td class=docs>
+        <div class="octowrap">
+          <a class="octothorpe" href="#section-5">#</a>
+        </div>
+        <p> Figure out what type of object is at the front of serialized, read it in, potentially
+ recursively creating several other sub-objects in the process, and return it.</p>
+      </td>
+      <td class=code>
+        <div class='highlight'><pre><span class="k">static</span> <span class="n">VALUE</span>
+<span class="nf">read_object</span><span class="p">()</span>
+<span class="p">{</span>
+  <span class="k">extern</span> <span class="n">uchar</span> <span class="o">*</span><span class="n">serialized</span><span class="p">;</span>
+  <span class="n">check_pointer</span><span class="p">(</span><span class="n">serialized</span><span class="p">);</span>
+  <span class="kt">uint32_t</span> <span class="n">type</span> <span class="o">=</span> <span class="o">*</span><span class="n">serialized</span><span class="o">++</span><span class="p">;</span>
+  <span class="kt">uint32_t</span> <span class="n">size</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
+
+  <span class="n">VALUE</span> <span class="n">object</span> <span class="o">=</span> <span class="n">Qnil</span><span class="p">;</span>
+
+  <span class="k">switch</span><span class="p">(</span><span class="n">type</span><span class="p">)</span> <span class="p">{</span>
+  <span class="k">case</span> <span class="n">PT_UNDEF</span>:
+    <span class="n">object</span> <span class="o">=</span> <span class="n">Qnil</span><span class="p">;</span>
+    <span class="k">break</span><span class="p">;</span>
+  <span class="k">case</span> <span class="n">PT_HASH</span>:
+    <span class="n">object</span> <span class="o">=</span> <span class="n">rb_hash_new</span><span class="p">();</span>
+    <span class="n">size</span> <span class="o">=</span> <span class="n">read_32_bit_integer</span><span class="p">();</span>
+    <span class="n">read_n_hash_pairs</span><span class="p">(</span><span class="n">object</span><span class="p">,</span> <span class="n">size</span><span class="p">);</span>
+    <span class="k">break</span><span class="p">;</span>
+  <span class="k">case</span> <span class="n">PT_INT32</span>:
+    <span class="n">object</span> <span class="o">=</span> <span class="n">INT2FIX</span><span class="p">(</span><span class="n">read_32_bit_integer</span><span class="p">());</span>
+    <span class="k">break</span><span class="p">;</span>
+  <span class="k">case</span> <span class="n">PT_ARRAY</span>:
+    <span class="n">object</span> <span class="o">=</span> <span class="n">rb_ary_new</span><span class="p">();</span>
+    <span class="n">size</span> <span class="o">=</span> <span class="n">read_32_bit_integer</span><span class="p">();</span>
+    <span class="n">read_n_array_entries</span><span class="p">(</span><span class="n">object</span><span class="p">,</span> <span class="n">size</span><span class="p">);</span>
+    <span class="k">break</span><span class="p">;</span>
+  <span class="k">case</span> <span class="n">PT_BOOLEAN</span>:
+    <span class="n">object</span> <span class="o">=</span> <span class="n">read_boolean</span><span class="p">();</span>
+    <span class="k">break</span><span class="p">;</span>
+  <span class="k">case</span> <span class="n">PT_STRING</span>:
+  <span class="k">case</span> <span class="n">PT_STRING_ALT</span>:
+    <span class="n">object</span> <span class="o">=</span> <span class="n">read_string</span><span class="p">(</span><span class="nb">false</span><span class="p">);</span>
+    <span class="k">break</span><span class="p">;</span>
+  <span class="k">case</span> <span class="n">PT_VECTOR</span>:
+    <span class="n">object</span> <span class="o">=</span> <span class="n">read_object</span><span class="p">();</span> <span class="c">// This is a marker we can just ignore...</span>
+    <span class="k">break</span><span class="p">;</span>
+  <span class="p">}</span>
+  
+  <span class="k">return</span> <span class="n">object</span><span class="p">;</span>
+<span class="p">}</span>
+
+<span class="cp">  </span></pre></div>
+      </td>
+    </tr>
+    <tr id='section-6'>
+      <td class=docs>
+        <div class="octowrap">
+          <a class="octothorpe" href="#section-6">#</a>
+        </div>
+        <p> We&rsquo;ve already created a hash, and read the size of it.
+ Now we need to read in n items, and add them to the hash.</p>
+      </td>
+      <td class=code>
+        <div class='highlight'><pre><span class="k">static</span> <span class="kt">void</span>
+<span class="nf">read_n_hash_pairs</span><span class="p">(</span><span class="n">VALUE</span> <span class="n">hash</span><span class="p">,</span> <span class="kt">uint32_t</span> <span class="n">num</span><span class="p">)</span>
+<span class="p">{</span>
+  <span class="k">if</span> <span class="p">(</span><span class="n">num</span> <span class="o">==</span> <span class="mi">0</span><span class="p">)</span> <span class="p">{</span> <span class="k">return</span><span class="p">;</span> <span class="p">}</span>
+  <span class="n">VALUE</span> <span class="n">temp</span> <span class="o">=</span> <span class="n">read_object</span><span class="p">();</span>
+  <span class="n">rb_hash_aset</span><span class="p">(</span><span class="n">hash</span><span class="p">,</span> <span class="n">read_string</span><span class="p">(</span><span class="nb">true</span><span class="p">),</span> <span class="n">temp</span><span class="p">);</span>
+  <span class="n">read_n_hash_pairs</span><span class="p">(</span><span class="n">hash</span><span class="p">,</span> <span class="n">num</span><span class="o">-</span><span class="mi">1</span><span class="p">);</span>
+<span class="p">}</span>
+
+<span class="k">static</span> <span class="n">VALUE</span>
+<span class="nf">read_boolean</span><span class="p">()</span>
+<span class="p">{</span>
+  <span class="k">extern</span> <span class="n">uchar</span> <span class="o">*</span><span class="n">serialized</span><span class="p">;</span>
+  <span class="n">check_pointer</span><span class="p">(</span><span class="n">serialized</span><span class="p">);</span>
+  <span class="k">return</span> <span class="p">(</span><span class="o">*</span><span class="n">serialized</span><span class="o">++</span> <span class="o">==</span> <span class="mi">128</span><span class="p">)</span> <span class="o">?</span> <span class="n">Qfalse</span> <span class="o">:</span> <span class="n">Qtrue</span><span class="p">;</span>
+<span class="p">}</span></pre></div>
+      </td>
+    </tr>
+    <tr id='section-7'>
+      <td class=docs>
+        <div class="octowrap">
+          <a class="octothorpe" href="#section-7">#</a>
+        </div>
+        <p> We&rsquo;ve already created an array, and read the size of it.
+ Now we need to read in n items, and add them to the array.</p>
+      </td>
+      <td class=code>
+        <div class='highlight'><pre><span class="k">static</span> <span class="kt">void</span>
+<span class="nf">read_n_array_entries</span><span class="p">(</span><span class="n">VALUE</span> <span class="n">array</span><span class="p">,</span> <span class="kt">uint32_t</span> <span class="n">num</span><span class="p">)</span>
+<span class="p">{</span>
+  <span class="k">if</span> <span class="p">(</span><span class="n">num</span> <span class="o">==</span> <span class="mi">0</span><span class="p">)</span> <span class="p">{</span> <span class="k">return</span><span class="p">;</span> <span class="p">}</span>
+  <span class="n">rb_ary_push</span><span class="p">(</span><span class="n">array</span><span class="p">,</span> <span class="n">read_object</span><span class="p">());</span>
+  <span class="n">read_n_array_entries</span><span class="p">(</span><span class="n">array</span><span class="p">,</span> <span class="n">num</span><span class="o">-</span><span class="mi">1</span><span class="p">);</span>
+<span class="p">}</span></pre></div>
+      </td>
+    </tr>
+    <tr id='section-8'>
+      <td class=docs>
+        <div class="octowrap">
+          <a class="octothorpe" href="#section-8">#</a>
+        </div>
+        <p> Given a size, read in a string of that size. Note that Storable seems to use 319 as a
+ magic value, meaning the string should be read until a very low character is found.
+ I should test this more specifically, but it&rsquo;s somewhere lower than &ldquo;\t&rdquo;, aka 7.</p>
+      </td>
+      <td class=code>
+        <div class='highlight'><pre><span class="k">static</span> <span class="n">VALUE</span>
+<span class="nf">read_string</span><span class="p">(</span><span class="n">bool</span> <span class="n">extended_size</span><span class="p">)</span>
+<span class="p">{</span>
+  <span class="k">extern</span> <span class="n">uchar</span> <span class="o">*</span><span class="n">serialized</span><span class="p">;</span>
+  <span class="n">check_pointer</span><span class="p">(</span><span class="n">serialized</span><span class="p">);</span>
+
+  <span class="n">VALUE</span> <span class="n">ret</span><span class="p">;</span>
+  <span class="kt">uint32_t</span> <span class="n">size</span> <span class="o">=</span> <span class="n">extended_size</span> <span class="o">?</span> <span class="n">read_32_bit_integer</span><span class="p">()</span> <span class="o">:</span> <span class="n">read_compact_size</span><span class="p">();</span>
+  <span class="kt">uint32_t</span> <span class="n">actual_size</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
+  <span class="n">uchar</span> <span class="o">*</span><span class="n">tp</span> <span class="o">=</span> <span class="n">serialized</span><span class="p">;</span>
+
+  <span class="k">if</span> <span class="p">(</span><span class="n">size</span> <span class="o">==</span> <span class="mi">319</span><span class="p">)</span> <span class="p">{</span> <span class="c">// apparently Storable uses \000\000\001\077 to mean &quot;read until n&lt;7&quot;</span>
+    <span class="k">while</span> <span class="p">(</span><span class="o">*</span><span class="n">tp</span><span class="o">++</span> <span class="o">&gt;=</span> <span class="mi">7</span><span class="p">)</span> <span class="p">{</span>
+      <span class="n">check_pointer</span><span class="p">(</span><span class="n">tp</span><span class="p">);</span>
+      <span class="n">actual_size</span><span class="o">++</span><span class="p">;</span>
+    <span class="p">}</span>
+    <span class="n">size</span> <span class="o">=</span> <span class="n">actual_size</span><span class="p">;</span>
+  <span class="p">}</span>
+  
+  <span class="n">uchar</span> <span class="o">*</span><span class="n">np</span> <span class="o">=</span> <span class="n">malloc</span><span class="p">(</span><span class="n">size</span><span class="o">+</span><span class="mi">1</span><span class="p">);</span>
+  <span class="n">check_pointer</span><span class="p">(</span><span class="n">serialized</span><span class="o">+</span><span class="n">size</span><span class="o">-</span><span class="mi">1</span><span class="p">);</span>
+  <span class="n">memcpy</span><span class="p">(</span><span class="n">np</span><span class="p">,</span> <span class="n">serialized</span><span class="p">,</span> <span class="n">size</span><span class="p">);</span>
+  <span class="n">serialized</span> <span class="o">+=</span> <span class="n">size</span><span class="p">;</span>
+  
+  <span class="n">ret</span> <span class="o">=</span> <span class="n">rb_str_new</span><span class="p">(</span><span class="n">np</span><span class="p">,</span> <span class="n">size</span><span class="p">);</span>
+  <span class="n">free</span><span class="p">(</span><span class="n">np</span><span class="p">);</span>
+  <span class="k">return</span> <span class="n">ret</span><span class="p">;</span>
+<span class="p">}</span></pre></div>
+      </td>
+    </tr>
+    <tr id='section-9'>
+      <td class=docs>
+        <div class="octowrap">
+          <a class="octothorpe" href="#section-9">#</a>
+        </div>
+        <p> Extended sizes are given as [w,x,y,z], where the size is 256*y + z.
+ This should really be read as a uint_32t, I guess.</p>
+      </td>
+      <td class=code>
+        <div class='highlight'><pre><span class="k">static</span> <span class="kt">uint32_t</span>
+<span class="nf">read_32_bit_integer</span><span class="p">()</span>
+<span class="p">{</span>
+  <span class="k">extern</span> <span class="n">uchar</span> <span class="o">*</span><span class="n">serialized</span><span class="p">;</span>
+
+  <span class="kt">uint32_t</span> <span class="n">size</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
+
+  <span class="n">check_pointer</span><span class="p">(</span><span class="n">serialized</span><span class="o">+</span><span class="mi">3</span><span class="p">);</span>
+
+  <span class="c">// I don&#39;t want to deal with byte-order. This is just easier. </span>
+  <span class="n">size</span> <span class="o">+=</span> <span class="p">(</span><span class="o">*</span><span class="n">serialized</span><span class="o">++</span><span class="p">)</span><span class="o">*</span><span class="mi">16777216</span><span class="p">;</span>
+  <span class="n">size</span> <span class="o">+=</span> <span class="p">(</span><span class="o">*</span><span class="n">serialized</span><span class="o">++</span><span class="p">)</span><span class="o">*</span><span class="mi">65536</span><span class="p">;</span>
+  <span class="n">size</span> <span class="o">+=</span> <span class="p">(</span><span class="o">*</span><span class="n">serialized</span><span class="o">++</span><span class="p">)</span><span class="o">*</span><span class="mi">256</span><span class="p">;</span>
+  <span class="n">size</span> <span class="o">+=</span> <span class="p">(</span><span class="o">*</span><span class="n">serialized</span><span class="o">++</span><span class="p">);</span>
+
+  <span class="k">return</span> <span class="n">size</span><span class="p">;</span>
+<span class="p">}</span></pre></div>
+      </td>
+    </tr>
+    <tr id='section-10'>
+      <td class=docs>
+        <div class="octowrap">
+          <a class="octothorpe" href="#section-10">#</a>
+        </div>
+        <p> Just one byte.</p>
+
+      </td>
+      <td class=code>
+        <div class='highlight'><pre><span class="k">static</span> <span class="kt">uint32_t</span>
+<span class="nf">read_compact_size</span><span class="p">()</span> <span class="p">{</span>
+  <span class="k">extern</span> <span class="n">uchar</span> <span class="o">*</span><span class="n">serialized</span><span class="p">;</span>
+  <span class="n">check_pointer</span><span class="p">(</span><span class="n">serialized</span><span class="p">);</span>
+  <span class="k">return</span> <span class="o">*</span><span class="n">serialized</span><span class="o">++</span><span class="p">;</span>
+<span class="p">}</span>
+
+
+<span class="kt">void</span>
+<span class="nf">Init_rcstorable</span><span class="p">()</span>
+<span class="p">{</span>
+  <span class="n">VALUE</span> <span class="n">mRcstorable</span> <span class="o">=</span> <span class="n">rb_define_module</span><span class="p">(</span><span class="s">&quot;RCStorable&quot;</span><span class="p">);</span>
+  <span class="n">rb_define_singleton_method</span><span class="p">(</span><span class="n">mRcstorable</span><span class="p">,</span> <span class="s">&quot;thaw&quot;</span><span class="p">,</span> <span class="n">thaw</span><span class="p">,</span> <span class="mi">1</span><span class="p">);</span>
+<span class="p">}</span></pre></div>
+      </td>
+    </tr>
+    </table>
+</div>
+</body>

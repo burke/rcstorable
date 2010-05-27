@@ -160,7 +160,10 @@ static void
 read_n_array_entries(VALUE array, uint32_t num)
 {
   if (num == 0) { return; }
-  read_compact_size();
+  /* read_compact_size();
+   * This is apparently not used. It is instead a typed value.
+   * Perhaps this is what the \004 prefix on some types means? We'll see if we get
+   * other errors now. */
   rb_ary_push(array, read_object());
   read_n_array_entries(array, num-1);
 }
